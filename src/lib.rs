@@ -36,26 +36,6 @@ impl From<ocl::Error> for Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-pub struct SetupData(ffi::clfftSetupData);
-
-impl SetupData {
-    pub fn new() -> Result<Self> {
-        let sdata = util::init_setup_data();
-        let err = unsafe { ffi::clfftSetup(&sdata) };
-        Result::from(err)?;
-        Ok(Self(sdata))
-    }
-}
-
-impl Drop for SetupData {
-    fn drop(&mut self) {
-        let err = unsafe { ffi::clfftTeardown() };
-        if let Err(e) = Result::from(err) {
-            panic!("Error when trying to drop clFFT resources\n{:?}", e);
-        }
-    }
-}
-
 /// A trait for all paremeters supported by `clFFT`.
 pub trait ClFftPrm: ocl::OclPrm {
     /// Is the type a double precision type.
@@ -106,7 +86,7 @@ pub enum Location {
 }
 
 /// Builder for a FFT plan.
-pub struct FftPlanBuilder<'a, T: ClFftPrm> {
+pub struct FftPlanBuilder<T: ClFftPrm> {
     data_type: PhantomData<T>,
     precision: Precision,
     dims: Option<ocl::SpatialDims>,
@@ -115,12 +95,14 @@ pub struct FftPlanBuilder<'a, T: ClFftPrm> {
     forward_scale: Option<f32>,
     backward_scale: Option<f32>,
     batch_size: Option<usize>,
-    setup_data: PhantomData<&'a SetupData>,
 }
 
 /// Creates a builder for baking a new FFT plan.
-pub fn builder<T: ClFftPrm>(_: &SetupData) -> FftPlanBuilder<'_, T> {
-    FftPlanBuilder {
+pub fn builder<T: ClFftPrm>() -> Result<FftPlanBuilder<T>> {
+    // TODO: fix pathological case of someone not baking their builders and leaking clFFT's memory; still safe though!
+    unsafe { util::initialize_library()? };
+
+    Ok(FftPlanBuilder {
         data_type: PhantomData,
         precision: Precision::Precise,
         dims: None,
@@ -129,11 +111,10 @@ pub fn builder<T: ClFftPrm>(_: &SetupData) -> FftPlanBuilder<'_, T> {
         forward_scale: None,
         backward_scale: None,
         batch_size: None,
-        setup_data: PhantomData,
-    }
+    })
 }
 
-impl<T: ClFftPrm> FftPlanBuilder<'_, T> {
+impl<T: ClFftPrm> FftPlanBuilder<T> {
     /// Set the floating point precision of the FFT data.
     pub fn precision(mut self, precision: Precision) -> Self {
         self.precision = precision;
@@ -181,11 +162,11 @@ impl<T: ClFftPrm> FftPlanBuilder<'_, T> {
 
     /// Creates a plan for an inplace FFT.
     pub fn bake_inplace_plan<'a>(
-        &mut self,
+        mut self,
         queue: &'a ocl::Queue,
         ctx: &ocl::Context,
     ) -> Result<FFTPlan<'a, T, InPlace>> {
-        let handle = util::bake_plan::<T>(self, queue, ctx, Location::Inplace)?;
+        let handle = util::bake_plan::<T>(&mut self, queue, ctx, Location::Inplace)?;
         Ok(FFTPlan {
             handle: handle,
             queue,
@@ -198,11 +179,11 @@ impl<T: ClFftPrm> FftPlanBuilder<'_, T> {
 
     /// Creates a plan for an out of place FFT.
     pub fn bake_out_of_place_plan<'a>(
-        &mut self,
+        mut self,
         queue: &'a ocl::Queue,
         ctx: &ocl::Context,
     ) -> Result<FFTPlan<'a, T, OutOfPlace>> {
-        let handle = util::bake_plan::<T>(self, queue, ctx, Location::OutOfPlace)?;
+        let handle = util::bake_plan::<T>(&mut self, queue, ctx, Location::OutOfPlace)?;
         Ok(FFTPlan {
             handle: handle,
             queue,
@@ -375,6 +356,11 @@ impl<'a, T: ClFftPrm, L: Placeness> Drop for FFTPlan<'a, T, L> {
         if self.handle != 0 {
             let _ = unsafe { ffi::clfftDestroyPlan(&mut self.handle) };
             self.handle = 0;
+        }
+
+        let res = unsafe { util::deinitialize_library() };
+        if let Err(e) = res {
+            panic!("Error when trying to deinitialize library: {:?}", e);
         }
     }
 }

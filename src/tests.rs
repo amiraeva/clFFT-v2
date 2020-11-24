@@ -4,8 +4,6 @@ use ocl::{Buffer, MemFlags};
 
 #[test]
 fn clfft_trivial() -> Result<()> {
-    let setup = SetupData::new()?;
-
     // Prepare some data
     let mut source = vec![0.0; 128];
     for i in 0..source.len() / 2 {
@@ -34,7 +32,7 @@ fn clfft_trivial() -> Result<()> {
         .expect("Failed to create GPU result buffer");
 
     // Make a plan
-    let mut plan = builder::<f64>(&setup)
+    let mut plan = builder::<f64>()?
         .precision(Precision::Precise)
         .dims(source.len())
         .input_layout(Layout::Real)
@@ -62,8 +60,6 @@ fn clfft_trivial() -> Result<()> {
 fn clfft_trivial2() -> Result<()> {
     const N: usize = 16;
 
-    let setup = SetupData::new()?;
-
     let ctx = ocl::Context::builder().build()?;
     let device = ocl::Device::first(ocl::Platform::first()?)?;
     let queue = ocl::Queue::new(&ctx, device, None)?;
@@ -79,7 +75,7 @@ fn clfft_trivial2() -> Result<()> {
     bufx.cmd().write(&x).enq()?;
 
     // // Make a plan
-    let mut plan = builder::<f32>(&setup)
+    let mut plan = builder::<f32>()?
         .precision(Precision::Precise)
         .dims(N)
         .input_layout(Layout::ComplexInterleaved)

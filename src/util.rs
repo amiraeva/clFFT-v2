@@ -2,23 +2,15 @@ use super::*;
 
 use ffi::*;
 use ocl::ffi::{cl_event, cl_mem};
+use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
+
+static SETUP_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 macro_rules! clfft_try {
     ( $result_expr: expr) => {
         let err = $result_expr;
         Result::from(err)?;
     };
-}
-
-pub(crate) fn init_setup_data() -> clfftSetupData {
-    let mut sdata = clfftSetupData::default();
-
-    sdata.major = clfftVersionMajor;
-    sdata.minor = clfftVersionMinor;
-    sdata.patch = clfftVersionPatch;
-    sdata.debugFlags = 0;
-
-    sdata
 }
 
 fn translate_to_fft_dim(dims: ocl::SpatialDims) -> clfftDim {
@@ -219,4 +211,40 @@ pub(crate) fn validate_buffer_len<T: ocl::OclPrm>(buffer: &ocl::Buffer<T>, buf_l
 		// TODO: convert to error
 		panic!("Input or output buffer length mismatch: expected {}, found: {}", expected_len, buffer.len());
 	}
+}
+
+pub(crate) unsafe fn initialize_library() -> Result<()> {
+	let old = SETUP_COUNT.fetch_add(1, SeqCst);
+
+	if old != 0 {
+		// no need to init library
+		return Ok(())
+	}
+
+	let sdata = init_setup_data();
+	let err = clfftSetup(&sdata);
+	Result::from(err)
+}
+
+pub(crate) unsafe fn deinitialize_library() -> Result<()> {
+	let old = SETUP_COUNT.fetch_sub(1, SeqCst);
+
+	if old != 1 {
+		// no need to deinit library
+		return Ok(())
+	}
+
+	let err =  ffi::clfftTeardown();
+	Result::from(err)
+}
+
+fn init_setup_data() -> clfftSetupData {
+    let mut sdata = clfftSetupData::default();
+
+    sdata.major = clfftVersionMajor;
+    sdata.minor = clfftVersionMinor;
+    sdata.patch = clfftVersionPatch;
+    sdata.debugFlags = 0;
+
+    sdata
 }
