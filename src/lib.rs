@@ -1,5 +1,9 @@
+use std::ptr;
+
 // #[link(name = "clFFT", kind = "dylib")]
 pub mod ffi;
+
+const DIM: ffi::clfftDim = ffi::clfftDim::CLFFT_1D;
 
 fn init_setup_data() -> ffi::clfftSetupData {
     let mut sdata = ffi::clfftSetupData::default();
@@ -11,31 +15,105 @@ fn init_setup_data() -> ffi::clfftSetupData {
 
     sdata
 }
+#[derive(Debug)]
+enum Error {
+    ffi(ffi::clfftStatus),
+    ocl(ocl::Error),
+}
+
+impl From<ffi::clfftStatus> for Result<(), Error> {
+    fn from(val: ffi::clfftStatus) -> Self {
+        match val {
+            ffi::clfftStatus::CLFFT_SUCCESS => Ok(()),
+            _ => Err(Error::ffi(val)),
+        }
+    }
+}
+
+impl From<ocl::Error> for Error {
+    fn from(val: ocl::Error) -> Self {
+        Self::ocl(val)
+    }
+}
+
+struct SetupData(ffi::clfftSetupData);
+
+impl SetupData {
+    fn new() -> Result<Self, Error> {
+        let sdata = init_setup_data();
+        let err = unsafe { ffi::clfftSetup(&sdata) };
+        Result::from(err)?;
+        Ok(Self(sdata))
+    }
+}
+struct PlanHandle(ffi::clfftPlanHandle);
+
+impl PlanHandle {
+    fn new() -> Self {
+        Self(ffi::clfftPlanHandle::default())
+    }
+
+    fn create_default(&mut self, ctx: &ocl::Context, len: usize) -> Result<&mut Self, Error> {
+        let err = unsafe { ffi::clfftCreateDefaultPlan(&mut self.0, ctx.as_ptr(), DIM, &len) };
+        Result::from(err)?;
+        Ok(self)
+    }
+
+    fn set_precision(&mut self, precision: ffi::clfftPrecision) -> Result<&mut Self, Error> {
+        let err = unsafe { ffi::clfftSetPlanPrecision(self.0, precision) };
+        Result::from(err)?;
+        Ok(self)
+    }
+
+    fn set_layout(
+        &mut self,
+        iLayout: ffi::clfftLayout,
+        oLayout: ffi::clfftLayout,
+    ) -> Result<&mut Self, Error> {
+        let err = unsafe { ffi::clfftSetLayout(self.0, iLayout, oLayout) };
+        Result::from(err)?;
+        Ok(self)
+    }
+
+    fn set_result_location(&mut self, place: ffi::clfftResultLocation) -> Result<&mut Self, Error> {
+        let err = unsafe { ffi::clfftSetResultLocation(self.0, place) };
+        Result::from(err)?;
+        Ok(self)
+    }
+
+    fn bake_plan(&mut self, queue: &mut ocl::Queue) -> Result<&mut Self, Error> {
+        let err =
+            unsafe { ffi::clfftBakePlan(self.0, 1, &mut queue.as_ptr(), None, ptr::null_mut()) };
+        Ok(self)
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn clfft_trivial() -> ocl::Result<()> {
+    fn clfft_trivial() -> Result<(), Error> {
         const N: usize = 16;
-        const DIM: ffi::clfftDim = ffi::clfftDim::CLFFT_1D;
 
-        let mut err;
+        let setup = SetupData::new();
 
-        let fft_setup = init_setup_data();
+        let mut phandle = ffi::clfftPlanHandle::default();
+        let mut pro_que = ocl::ProQue::builder().build()?;
 
-        unsafe {
-            err = ffi::clfftSetup(&fft_setup);
+        let mut phandle = PlanHandle::new();
 
-            let mut phandle = ffi::clfftPlanHandle::default();
-            let mut pro_que = ocl::ProQue::builder().build()?;
-            let ctx = pro_que.context().as_core();
-    
-            err = ffi::clfftCreateDefaultPlan(&mut phandle, ctx.as_ptr(), DIM, &N);
-            err = ffi::clfftSetPlanPrecision(phandle, ffi::clfftPrecision::CLFFT_SINGLE_FAST);
-        }
+        phandle
+            .create_default(pro_que.context(), N)?
+            .set_precision(ffi::clfftPrecision::CLFFT_SINGLE_FAST)?
+            .set_layout(
+                ffi::clfftLayout::CLFFT_REAL,
+                ffi::clfftLayout::CLFFT_HERMITIAN_INTERLEAVED,
+            )?
+            .set_result_location(ffi::clfftResultLocation::CLFFT_INPLACE);
 
+        // err = ffi::clfftCreateDefaultPlan(&mut phandle, ctx.as_ptr(), DIM, &N);
+        // err = ffi::clfftSetPlanPrecision(phandle, ffi::clfftPrecision::CLFFT_SINGLE_FAST);
 
         Ok(())
     }
@@ -60,10 +138,13 @@ mod tests {
         unsafe { kernel.enq()? };
 
         let mut read_buf: Box<[f32]> = (0..buf.len()).map(|_| 0.0).collect();
-        
+
         buf.read(&mut *read_buf).enq()?;
 
-        println!("The value at index [{}] is now '{}'!", 200007, read_buf[200007]);
+        println!(
+            "The value at index [{}] is now '{}'!",
+            200007, read_buf[200007]
+        );
 
         Ok(())
     }

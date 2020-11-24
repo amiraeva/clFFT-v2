@@ -100,7 +100,7 @@ pub enum clfftDim {
 #[repr(u32)]
 #[doc = "  @brief Specify the expected layouts of the buffers"]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum clfftLayout_ {
+pub enum clfftLayout {
     #[doc = "< An array of complex numbers, with real and imaginary components together (default)."]
     CLFFT_COMPLEX_INTERLEAVED = 1,
     #[doc = "< Separate arrays of real components and imaginary components."]
@@ -114,8 +114,7 @@ pub enum clfftLayout_ {
     #[doc = "< The last value of the enum, and marks the length of clfftLayout."]
     ENDLAYOUT = 6,
 }
-#[doc = "  @brief Specify the expected layouts of the buffers"]
-pub use self::clfftLayout_ as clfftLayout;
+
 #[repr(u32)]
 #[doc = "  @brief Specify the expected precision of each FFT."]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
@@ -154,7 +153,7 @@ pub use self::clfftDirection_ as clfftDirection;
 #[repr(u32)]
 #[doc = "  @brief Specify wheter the input buffers are overwritten with results"]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
-pub enum clfftResultLocation_ {
+pub enum clfftResultLocation {
     #[doc = "< Input and output buffers are the same (default)."]
     CLFFT_INPLACE = 1,
     #[doc = "< Input and output buffers are separate."]
@@ -162,8 +161,7 @@ pub enum clfftResultLocation_ {
     #[doc = "< The last value of the enum, and marks the length of clfftPlaceness."]
     ENDPLACE = 3,
 }
-#[doc = "  @brief Specify wheter the input buffers are overwritten with results"]
-pub use self::clfftResultLocation_ as clfftResultLocation;
+
 #[repr(u32)]
 #[doc = " @brief Determines whether the result is returned in original order. It is valid only for"]
 #[doc = "dimensions greater than 1."]
