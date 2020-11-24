@@ -184,14 +184,15 @@ impl<T: ClFftPrm> FftPlanBuilder<'_, T> {
         &mut self,
         queue: &'a ocl::Queue,
         ctx: &ocl::Context,
-    ) -> Result<FftInplacePlan<'a, T>> {
+    ) -> Result<FFTPlan<'a, T, InPlace>> {
         let handle = util::bake_plan::<T>(self, queue, ctx, Location::Inplace)?;
-        Ok(FftInplacePlan {
+        Ok(FFTPlan {
             handle: handle,
             queue,
             data_type: std::marker::PhantomData,
             wait_list: None,
             dest_list: None,
+            _location: InPlace,
         })
     }
 
@@ -200,39 +201,37 @@ impl<T: ClFftPrm> FftPlanBuilder<'_, T> {
         &mut self,
         queue: &'a ocl::Queue,
         ctx: &ocl::Context,
-    ) -> Result<FftOutOfPlacePlan<'a, T>> {
+    ) -> Result<FFTPlan<'a, T, OutOfPlace>> {
         let handle = util::bake_plan::<T>(self, queue, ctx, Location::OutOfPlace)?;
-        Ok(FftOutOfPlacePlan {
+        Ok(FFTPlan {
             handle: handle,
             queue,
             data_type: std::marker::PhantomData,
             wait_list: None,
             dest_list: None,
+            _location: OutOfPlace,
         })
     }
 }
 
-/// A plan is a repository of state for calculating FFT's.  Allows the runtime to pre-calculate kernels, programs
-/// and buffers and associate them with buffers of specified dimensions.
-pub struct FftInplacePlan<'a, T: ClFftPrm> {
+pub struct InPlace;
+pub struct OutOfPlace;
+
+pub trait Placeness {}
+
+impl Placeness for InPlace {}
+impl Placeness for OutOfPlace {}
+
+pub struct FFTPlan<'a, T: ClFftPrm, L: Placeness> {
     handle: ffi::clfftPlanHandle,
     queue: &'a ocl::Queue,
     data_type: std::marker::PhantomData<T>,
     wait_list: Option<&'a ocl::EventList>,
     dest_list: Option<&'a mut ocl::EventList>,
+    _location: L,
 }
 
-/// A plan is a repository of state for calculating FFT's.  Allows the runtime to pre-calculate kernels, programs
-/// and buffers and associate them with buffers of specified dimensions.
-pub struct FftOutOfPlacePlan<'a, T: ClFftPrm> {
-    handle: ffi::clfftPlanHandle,
-    queue: &'a ocl::Queue,
-    data_type: std::marker::PhantomData<T>,
-    wait_list: Option<&'a ocl::EventList>,
-    dest_list: Option<&'a mut ocl::EventList>,
-}
-
-impl<'a, T: ClFftPrm> FftInplacePlan<'a, T> {
+impl<'a, T: ClFftPrm, L: Placeness> FFTPlan<'a, T, L> {
     /// Specifies the list of events to wait on before the command will run.
     pub fn ewait(mut self, wait_list: &'a ocl::EventList) -> Self {
         self.wait_list = Some(wait_list);
@@ -246,138 +245,18 @@ impl<'a, T: ClFftPrm> FftInplacePlan<'a, T> {
         self
     }
 
-    /// Enqueues the FFT so that it gets performed on the device.
-    pub fn enq(&mut self, direction: Direction, buffer: &mut ocl::Buffer<T>) -> Result<()> {
-        let input_len = self.dims().to_len()
-            * if self.input_layout() == Layout::Real {
-                1
-            } else {
-                2
-            };
-
-        if input_len != buffer.len() {
-            // return Err(format!("FFT plan requires that input buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", input_len).into());
-            // TODO: convert to error
-            panic!("FFT plan requires that input buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", input_len);
-        }
-
-        util::enqueue::<T>(
-            self.handle,
-            direction,
-            self.queue,
-            buffer,
-            None,
-            &self.wait_list,
-            &mut self.dest_list,
-        )
-    }
-}
-
-impl<'a, T: ClFftPrm> FftOutOfPlacePlan<'a, T> {
-    /// Specifies the list of events to wait on before the command will run.
-    pub fn ewait(mut self, wait_list: &'a ocl::EventList) -> Self {
-        self.wait_list = Some(wait_list);
-        self
-    }
-
-    /// Specifies the destination list or empty event for a new, optionally
-    /// created event associated with this command.
-    pub fn enew(mut self, new_event_dest: &'a mut ocl::EventList) -> Self {
-        self.dest_list = Some(new_event_dest);
-        self
-    }
-
-    /// Enqueues the FFT so that it gets performed on the device.
-    pub fn enq(
-        &mut self,
-        direction: Direction,
-        buffer: &ocl::Buffer<T>,
-        result: &mut ocl::Buffer<T>,
-    ) -> Result<()> {
-        let input_len = self.dims().to_len()
-            * if self.input_layout() == Layout::Real {
-                1
-            } else {
-                2
-            };
-
-        if input_len != buffer.len() {
-            // return Err(format!("FFT plan requires that input buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", input_len).into());
-            // TODO: convert to error
-            panic!("FFT plan requires that input buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", input_len);
-        }
-
-        let output_len = self.dims().to_len()
-            * if self.output_layout() == Layout::Real {
-                1
-            } else {
-                2
-            };
-        if output_len != result.len() {
-            // return Err(format!("FFT plan requires that output buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", output_len).into());
-            panic!("FFT plan requires that output buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", output_len);
-        }
-
-        util::enqueue::<T>(
-            self.handle,
-            direction,
-            self.queue,
-            buffer,
-            Some(result),
-            &self.wait_list,
-            &mut self.dest_list,
-        )
-    }
-}
-
-/// Gets the native `clFFT` plan handle from a type.
-pub trait AsClFftPlanHandle {
-    unsafe fn as_ptr(&self) -> ffi::clfftPlanHandle;
-}
-
-impl<'a, T: ClFftPrm> AsClFftPlanHandle for FftOutOfPlacePlan<'a, T> {
-    /// Returns the native clFFT plan handle.
     unsafe fn as_ptr(&self) -> ffi::clfftPlanHandle {
         self.handle
     }
-}
 
-impl<'a, T: ClFftPrm> AsClFftPlanHandle for FftInplacePlan<'a, T> {
-    /// Returns the native clFFT plan handle.
-    unsafe fn as_ptr(&self) -> ffi::clfftPlanHandle {
-        self.handle
-    }
-}
-
-/// Getters for a FFT plan.
-pub trait FftPlan {
-    /// Gets expected precision of each FFT.
-    fn precision(&self) -> Precision;
-    /// Gets the FFT dimensions.
-    fn dims(&self) -> ocl::SpatialDims;
-    /// the expected layouts of the input buffers.
-    fn input_layout(&self) -> Layout;
-    /// the expected layouts of the output buffers.
-    fn output_layout(&self) -> Layout;
-    /// Gets the scaling factors for FFTs.
-    fn forward_scale(&self) -> f32;
-    /// Gets the scaling factors for IFFTs.
-    fn backward_scale(&self) -> f32;
-    /// Gets the patch size.
-    fn batch_size(&self) -> usize;
-    /// Gets whether the input buffers are overwritten with results.
-    fn result_location(&self) -> Location;
-}
-
-impl<T: AsClFftPlanHandle> FftPlan for T {
-    fn precision(&self) -> Precision {
+    pub fn precision(&self) -> Precision {
         let handle = unsafe { self.as_ptr() };
         let mut precision = ffi::clfftPrecision::CLFFT_SINGLE;
         clfft_panic!(unsafe { ffi::clfftGetPlanPrecision(handle, &mut precision) });
         util::translate_precision_back(precision)
     }
 
-    fn result_location(&self) -> Location {
+    pub fn result_location(&self) -> Location {
         let handle = unsafe { self.as_ptr() };
         let mut location = ffi::clfftResultLocation::CLFFT_INPLACE;
         clfft_panic!(unsafe { ffi::clfftGetResultLocation(handle, &mut location) });
@@ -425,7 +304,7 @@ impl<T: AsClFftPlanHandle> FftPlan for T {
         util::translate_layout_back(output_layout)
     }
 
-    fn forward_scale(&self) -> f32 {
+    pub fn forward_scale(&self) -> f32 {
         let handle = unsafe { self.as_ptr() };
         let mut scale = 1.0;
         clfft_panic!(unsafe {
@@ -434,7 +313,7 @@ impl<T: AsClFftPlanHandle> FftPlan for T {
         scale
     }
 
-    fn backward_scale(&self) -> f32 {
+    pub fn backward_scale(&self) -> f32 {
         let handle = unsafe { self.as_ptr() };
         let mut scale = 1.0;
         clfft_panic!(unsafe {
@@ -443,24 +322,55 @@ impl<T: AsClFftPlanHandle> FftPlan for T {
         scale
     }
 
-    fn batch_size(&self) -> usize {
+    pub fn batch_size(&self) -> usize {
         let handle = unsafe { self.as_ptr() };
         let mut batch_size = 0;
         clfft_panic!(unsafe { ffi::clfftGetPlanBatchSize(handle, &mut batch_size) });
         batch_size
     }
-}
 
-impl<'a, T: ClFftPrm> Drop for FftInplacePlan<'a, T> {
-    fn drop(&mut self) {
-        if self.handle != 0 {
-            let _ = unsafe { ffi::clfftDestroyPlan(&mut self.handle) };
-            self.handle = 0;
-        }
+    fn enq_inner(
+        &mut self,
+        direction: Direction,
+        buffer: &ocl::Buffer<T>,
+        result: Option<&mut ocl::Buffer<T>>,
+    ) -> Result<()> {
+        util::enqueue(
+            self.handle,
+            direction,
+            self.queue,
+            buffer,
+            result,
+            &self.wait_list,
+            &mut self.dest_list,
+        )
     }
 }
 
-impl<'a, T: ClFftPrm> Drop for FftOutOfPlacePlan<'a, T> {
+impl<'a, T: ClFftPrm> FFTPlan<'a, T, InPlace> {
+    /// Enqueues the FFT so that it gets performed on the device.
+    pub fn enq(&mut self, direction: Direction, buffer: &mut ocl::Buffer<T>) -> Result<()> {
+        util::validate_buffer_len(buffer, self.input_layout(), self.dims());
+        self.enq_inner(direction, buffer, None)
+    }
+}
+
+impl<'a, T: ClFftPrm> FFTPlan<'a, T, OutOfPlace> {
+    /// Enqueues the FFT so that it gets performed on the device.
+    pub fn enq(
+        &mut self,
+        direction: Direction,
+        buffer: &ocl::Buffer<T>,
+        result: &mut ocl::Buffer<T>,
+    ) -> Result<()> {
+        util::validate_buffer_len(buffer, self.input_layout(), self.dims());
+        util::validate_buffer_len(result, self.output_layout(), self.dims());
+
+        self.enq_inner(direction, buffer, Some(result))
+    }
+}
+
+impl<'a, T: ClFftPrm, L: Placeness> Drop for FFTPlan<'a, T, L> {
     fn drop(&mut self) {
         if self.handle != 0 {
             let _ = unsafe { ffi::clfftDestroyPlan(&mut self.handle) };

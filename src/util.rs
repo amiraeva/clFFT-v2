@@ -192,3 +192,31 @@ pub(crate) fn enqueue<T: ClFftPrm>(
     });
     Ok(())
 }
+
+pub(crate) fn validate_buffer_len<T: ocl::OclPrm>(buffer: &ocl::Buffer<T>, buf_layout: Layout, dims: ocl::SpatialDims) {
+	let factor = if buf_layout == Layout::Real {
+		1
+	} else {
+		2
+	};
+
+	let expected_len = dims.to_len() * factor;
+
+	// TODO get more meaningful error messages
+	// if input_len != buffer.len() {
+	//     // return Err(format!("FFT plan requires that input buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", input_len).into());
+	//     // TODO: convert to error
+	//     panic!("FFT plan requires that input buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", input_len);
+	// }
+
+	// if output_len != result.len() {
+	//     // return Err(format!("FFT plan requires that output buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", output_len).into());
+	//     // TODO: convert to error
+	//     panic!("FFT plan requires that output buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", output_len);
+	// }
+
+	if expected_len != buffer.len() {
+		// TODO: convert to error
+		panic!("Input or output buffer length mismatch: expected {}, found: {}", expected_len, buffer.len());
+	}
+}
