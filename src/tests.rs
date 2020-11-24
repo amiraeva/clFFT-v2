@@ -17,12 +17,14 @@ fn clfft_trivial() -> Result<()> {
     let queue = ocl::Queue::new(&ctx, device, None)?;
 
     // Create buffers
-    let mut in_buffer = Buffer::builder()
-        .queue(queue.clone())
-        .flags(MemFlags::new().read_write().copy_host_ptr())
-        .len(source.len())
-        .copy_host_slice(&source)
-        .build()?;
+    let mut in_buffer = unsafe {
+        Buffer::builder()
+            .queue(queue.clone())
+            .flags(MemFlags::new().read_write())
+            .len(source.len())
+            .use_host_slice(&source)
+            .build()?
+    };
 
     let mut res_buffer = Buffer::<f64>::builder()
         .queue(queue.clone())
@@ -65,12 +67,14 @@ fn clfft_trivial2() -> Result<()> {
     let queue = ocl::Queue::new(&ctx, device, None)?;
 
     let x = vec![0f32; 2 * N];
-    let mut bufx = ocl::Buffer::builder()
-        .queue(queue.clone())
-        .flags(ocl::MemFlags::new().read_write())
-        .len(2 * N)
-        .copy_host_slice(&x)
-        .build()?;
+    let mut bufx = unsafe {
+        ocl::Buffer::builder()
+            .queue(queue.clone())
+            .flags(ocl::MemFlags::new().read_write())
+            .len(2 * N)
+            .use_host_slice(&x)
+            .build()?
+    };
 
     bufx.cmd().write(&x).enq()?;
 
