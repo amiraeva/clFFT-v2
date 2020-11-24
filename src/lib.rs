@@ -358,10 +358,11 @@ impl<'a, T: ClFftPrm, L: Placeness> Drop for FFTPlan<'a, T, L> {
             self.handle = 0;
         }
 
-        let res = unsafe { util::deinitialize_library() };
-        if let Err(e) = res {
-            panic!("Error when trying to deinitialize library: {:?}", e);
-        }
+        let _res = unsafe { util::deinitialize_library() };
+
+        // if let Err(e) = _res {
+        //     panic!("Error when trying to deinitialize library: {:?}", e);
+        // }
     }
 }
 

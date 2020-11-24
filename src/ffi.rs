@@ -3,7 +3,7 @@
 #![allow(non_snake_case)]
 #![link(name = "clFFT", kind = "dylib")]
 
-use cl_sys::{cl_context, cl_mem, cl_ulong, cl_float, cl_command_queue, cl_uint, cl_event};
+use ocl::ffi::{cl_context, cl_mem, cl_ulong, cl_float, cl_command_queue, cl_uint, cl_event};
 
 pub const clfftVersionMajor: cl_uint = 2;
 pub const clfftVersionMinor: cl_uint = 12;
