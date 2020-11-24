@@ -40,10 +40,6 @@ macro_rules! clfft_try {
     ( $result_expr: expr) => {
         let err = $result_expr;
         Result::from(err)?;
-        // if result != ffi::clfftStatus::CLFFT_SUCCESS {
-        //     let error_code: i32 = unsafe { mem::transmute(result) };
-        //     return Err(format!("FOREIGN_CLFFT_ERROR {}\nSee http://clmathlibraries.github.io/clFFT/clFFT_8h.html#a74e303bed132064cfa22c1cce96d2bce for further information", error_code).into());
-        // }
     }
 }
 
@@ -468,7 +464,7 @@ impl<'a, T: ClFftPrm> FftOutOfPlacePlan<'a, T> {
             } else {
                 2
             };
-        if output_len != buffer.len() {
+        if output_len != result.len() {
             // return Err(format!("FFT plan requires that output buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", output_len).into());
             panic!("FFT plan requires that output buffer must have a size of {}. Is there a dimension mismatch between real and complex numbers?", output_len);
         }
@@ -671,73 +667,60 @@ impl<'a, T: ClFftPrm> Drop for FftOutOfPlacePlan<'a, T> {
 mod tests {
     use super::*;
 
-    use ocl::builders::ProgramBuilder;
-    use ocl::{Buffer, MemFlags, ProQue};
+    use ocl::{Buffer, MemFlags};
 
     #[test]
     fn clfft_trivial() -> Result<()> {
         let setup = SetupData::new()?;
 
         // Prepare some data
-        let mut source = vec![0.0; 100];
+        let mut source = vec![0.0; 128];
         for i in 0..source.len() / 2 {
             let x = std::f64::consts::PI * 4.0 * (i as f64 / 2.0 / source.len() as f64);
             source[2 * i] = x.sin();
             source[2 * i + 1] = x.sin();
         }
 
-        // Build ocl ProQue
-        // let prog_bldr = ProgramBuilder::new();
-        // let ocl_pq = ProQue::builder()
-        //     // .prog_bldr(prog_bldr)
-        //     // .src(SRC)
-        //     .dims([source.len()])
-        //     .build()?;
-
-        // let queue = ocl::Queue:
-
         let ctx = ocl::Context::builder().build()?;
         let device = ocl::Device::first(ocl::Platform::first()?)?;
         let queue = ocl::Queue::new(&ctx, device, None)?;
 
         // Create buffers
-        let mut in_buffer = unsafe {
-            Buffer::builder()
-                .queue(queue.clone())
-                .flags(MemFlags::new().read_write().copy_host_ptr())
-                .len([source.len()])
-                .use_host_slice(&source)
-                .build()
-        }?;
+        let mut in_buffer = Buffer::builder()
+            .queue(queue.clone())
+            .flags(MemFlags::new().read_write().copy_host_ptr())
+            .len(source.len())
+            .copy_host_slice(&source)
+            .build()?;
 
-        // let mut res_buffer = Buffer::<f64>::builder()
-        //     .queue(queue.clone())
-        //     .flags(MemFlags::new().write_only())
-        //     .len([source.len() / 2])
-        //     .build()
-        //     .expect("Failed to create GPU result buffer");
+        let mut res_buffer = Buffer::<f64>::builder()
+            .queue(queue.clone())
+            .flags(MemFlags::new().write_only())
+            .len(2 * source.len())
+            .build()
+            .expect("Failed to create GPU result buffer");
 
-        // // Make a plan
-        // let mut plan = builder::<f64>(&setup)
-        //     .precision(Precision::Precise)
-        //     .dims([source.len() / 2])
-        //     .input_layout(Layout::ComplexInterleaved)
-        //     .output_layout(Layout::ComplexInterleaved)
-        //     .bake_out_of_place_plan(&queue, &ctx)?;
+        // Make a plan
+        let mut plan = builder::<f64>(&setup)
+            .precision(Precision::Precise)
+            .dims(source.len())
+            .input_layout(Layout::Real)
+            .output_layout(Layout::HermitianInterleaved)
+            .bake_out_of_place_plan(&queue, &ctx)?;
 
-        // // Execute plan
-        // plan.enq(Direction::Forward, &mut in_buffer, &mut res_buffer)
-        //     .unwrap();
+        // Execute plan
+        plan.enq(Direction::Forward, &mut in_buffer, &mut res_buffer)
+            .unwrap();
 
-        // // Wait for calculation to finish and read results
-        // res_buffer
-        //     .cmd()
-        //     .read(&mut source)
-        //     .enq()
-        //     .expect("Transferring result vector from the GPU back to memory failed");
+        // Wait for calculation to finish and read results
+        res_buffer
+            .cmd()
+            .read(&mut source)
+            .enq()
+            .expect("Transferring result vector from the GPU back to memory failed");
 
-        // queue.finish()?;
-        // println!("{:?}", source);
+        queue.finish()?;
+        println!("{:?}", source);
 
         Ok(())
     }
@@ -752,7 +735,7 @@ mod tests {
         let device = ocl::Device::first(ocl::Platform::first()?)?;
         let queue = ocl::Queue::new(&ctx, device, None)?;
 
-        let x = vec![0f64; 2 * N];
+        let x = vec![0f32; 2 * N];
         let mut bufx = ocl::Buffer::builder()
             .queue(queue.clone())
             .flags(ocl::MemFlags::new().read_write())
@@ -763,14 +746,14 @@ mod tests {
         bufx.cmd().write(&x).enq()?;
 
         // // Make a plan
-        let mut plan = builder::<f64>(&setup)
+        let mut plan = builder::<f32>(&setup)
             .precision(Precision::Precise)
             .dims(N)
             .input_layout(Layout::ComplexInterleaved)
             .output_layout(Layout::ComplexInterleaved)
             .bake_inplace_plan(&queue, &ctx)?;
 
-        // plan.enq(Direction::Forward, &mut bufx)?;
+        plan.enq(Direction::Forward, &mut bufx)?;
 
         Ok(())
     }
