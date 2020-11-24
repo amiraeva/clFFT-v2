@@ -1,6 +1,7 @@
 #![allow(non_upper_case_globals)]
 #![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
+#![link(name = "clFFT", kind = "dylib")]
 
 use cl_sys::{cl_context, cl_mem, cl_ulong, cl_float, cl_command_queue, cl_uint, cl_event};
 
@@ -260,6 +261,8 @@ pub enum clfftCallbackType_ {
 pub use self::clfftCallbackType_ as clfftCallbackType;
 #[doc = "  @brief An abstract handle to the object that represents the state of the FFT(s)"]
 pub type clfftPlanHandle = usize;
+
+#[link(name = "clFFT", kind = "dylib")]
 extern "C" {
     #[doc = " @brief Initialize the internal FFT resources."]
     #[doc = "  @details The internal resources include FFT implementation caches kernels, programs, and buffers."]
